@@ -121,8 +121,13 @@ class Ops2BeadsCliTests(unittest.TestCase):
             ).stdout
         )
 
-    def test_plan_writes_handoff_file_and_infers_dependencies(self) -> None:
-        proc = self.run_cli("plan", "--change", "add-dark-mode", "--json")
+    def test_running_without_command_shows_help(self) -> None:
+        proc = self.run_cli(check=False)
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("usage:", proc.stdout)
+
+    def test_inspect_infers_dependencies(self) -> None:
+        proc = self.run_cli("inspect", "add-dark-mode", "--json")
         payload = json.loads(proc.stdout)
 
         self.assertEqual(payload["changeName"], "add-dark-mode")
@@ -136,13 +141,12 @@ class Ops2BeadsCliTests(unittest.TestCase):
         self.assertIn("1.3", by_number["2.4"]["dependsOn"])
         self.assertTrue(by_number["2.2"]["dependencyReasons"])
 
-        self.assertTrue(self.handoff_file().exists())
-        self.assertTrue((self.change_dir / "beads-summary.md").exists())
+        self.assertFalse(self.handoff_file().exists())
 
-    def test_handoff_bootstraps_once_then_mirrors_without_duplicates(self) -> None:
+    def test_sync_bootstraps_once_then_mirrors_without_duplicates(self) -> None:
         self.init_beads()
 
-        self.run_cli("handoff", "--change", "add-dark-mode")
+        self.run_cli("sync", "add-dark-mode")
         handoff = self.read_handoff()
         target = next(item for item in handoff["workItems"] if item["taskNumber"] == "1.1")
         subprocess.run(
@@ -153,7 +157,7 @@ class Ops2BeadsCliTests(unittest.TestCase):
             text=True,
         )
 
-        self.run_cli("handoff", "--change", "add-dark-mode", "--annotate-tasks")
+        self.run_cli("sync", "add-dark-mode")
 
         issues = self.list_issues()
         self.assertEqual(len(issues), 8)
@@ -168,9 +172,9 @@ class Ops2BeadsCliTests(unittest.TestCase):
         tasks_text = (self.change_dir / "tasks.md").read_text(encoding="utf-8")
         self.assertIn(f"- [x] 1.1 Create ThemeContext with light/dark state [beads: {target['beadsId']} status: closed]", tasks_text)
 
-    def test_reconcile_reports_stale_items_after_task_removal(self) -> None:
+    def test_sync_reports_stale_items_after_task_removal(self) -> None:
         self.init_beads()
-        self.run_cli("handoff", "--change", "add-dark-mode")
+        self.run_cli("sync", "add-dark-mode")
 
         self.write_tasks(
             """\
@@ -186,7 +190,7 @@ class Ops2BeadsCliTests(unittest.TestCase):
             """
         )
 
-        proc = self.run_cli("reconcile", "--change", "add-dark-mode", "--json")
+        proc = self.run_cli("sync", "add-dark-mode", "--json")
         payload = json.loads(proc.stdout)
 
         self.assertIn("staleItems", payload)
@@ -195,14 +199,41 @@ class Ops2BeadsCliTests(unittest.TestCase):
         self.assertIn("2.1", stale_keys)
         self.assertIn("2.3", stale_keys)
 
-    def test_handoff_with_annotations_writes_status_aware_tags(self) -> None:
+    def test_sync_writes_status_aware_tags_and_beads_status_wins_over_checkbox(self) -> None:
         self.init_beads()
-        self.run_cli("handoff", "--change", "add-dark-mode", "--annotate-tasks")
+        self.run_cli("sync", "add-dark-mode")
 
         tasks_text = (self.change_dir / "tasks.md").read_text(encoding="utf-8")
         self.assertIn("[beads:", tasks_text)
         self.assertIn("status: open", tasks_text)
         self.assertEqual(tasks_text.count("[beads:"), 7)
+
+        self.write_tasks(
+            """\
+            # Tasks
+
+            ## 1. Theme Infrastructure
+            - [x] 1.1 Create ThemeContext with light/dark state
+            - [ ] 1.2 Implement localStorage persistence after 1.1
+            - [ ] 1.3 Define CSS custom properties for the dark palette
+
+            ## 2. UI Components
+            - [ ] 2.1 Create ThemeToggle component
+            - [ ] 2.2 Add theme toggle to settings page
+            - [ ] 2.3 Add quick toggle to header
+            - [ ] 2.4 Update existing components to use CSS variables
+            """
+        )
+        self.run_cli("sync", "add-dark-mode")
+        tasks_text = (self.change_dir / "tasks.md").read_text(encoding="utf-8")
+        self.assertIn("- [ ] 1.1 Create ThemeContext with light/dark state", tasks_text)
+
+    def test_sync_accepts_change_directory_path(self) -> None:
+        self.init_beads()
+        proc = self.run_cli("sync", str(self.change_dir), "--json")
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload["changeName"], "add-dark-mode")
+        self.assertTrue(self.handoff_file().exists())
 
 
 if __name__ == "__main__":

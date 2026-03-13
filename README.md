@@ -16,55 +16,51 @@ It then:
 1. builds a normalized handoff plan
 2. writes `beads-handoff.json`
 3. writes `beads-summary.md`
-4. optionally creates Beads issues via `br` on first handoff, then mirrors Beads status on later handoff runs
-5. can annotate `tasks.md` with `[beads: <id> status: <status>]` tags
+4. syncs planning changes into Beads via `br`
+5. mirrors Beads IDs and live statuses back into `tasks.md`
 
-## Commands
+## Recommended workflow
 
 ```bash
 # inspect inferred work items
-python3 ops2beads.py inspect --change <change>
+python3 ops2beads.py inspect <change-id>
+# or
+python3 ops2beads.py inspect openspec/changes/<change-id>
 
-# persist the normalized plan only
-python3 ops2beads.py plan --change <change>
+# preview the full sync without changing Beads or local files
+python3 ops2beads.py sync <change-id> --dry-run
 
-# preview Beads handoff without mutating .beads/
-python3 ops2beads.py handoff --change <change> --dry-run
-
-# first run: create/update Beads issues from the current OpenSpec artifacts
-# later runs: mirror current Beads status from the saved handoff
-python3 ops2beads.py handoff --change <change>
-
-# rebuild the plan and reconcile it against an existing handoff
-python3 ops2beads.py reconcile --change <change>
+# bootstrap on first run; afterwards sync plan changes and mirror status
+python3 ops2beads.py sync <change-id>
+# or
+python3 ops2beads.py sync openspec/changes/<change-id>
 ```
 
-Repeated `handoff` is status-aware:
-- first run bootstraps the Beads mapping
-- later runs refresh current Beads statuses from `.beads/`
-- with `--annotate-tasks`, it writes tags like `[beads: bd-123 status: in_progress]`
-- if a Beads issue is `closed`, the corresponding task checkbox is mirrored as `- [x]`
+`sync` applies this authority model:
+- OpenSpec is authoritative for planning structure
+  - task existence
+  - titles/descriptions
+  - dependency graph
+- Beads is authoritative for execution state
+  - issue IDs
+  - open / in_progress / closed status
+  - task checkbox mirroring
 
-Useful options:
-
-```bash
-# target a different repo
-python3 ops2beads.py handoff --project-root ~/sources/myrepo --change add-dark-mode
-
-# update tasks.md with Beads IDs during plan/handoff/reconcile
-python3 ops2beads.py handoff --change add-dark-mode --annotate-tasks
-```
+Conflict policy:
+- if a task is removed from OpenSpec but the Beads issue still exists, report it as stale; do not auto-close it
+- if `tasks.md` is checked off but the Beads issue is still open, Beads wins and the task is rewritten as unchecked
+- if a Beads issue is closed, the corresponding task is mirrored as `- [x]`
 
 ## Notes
 
 - The tool is non-interactive and agent-friendly.
+- The supported commands are now `inspect` and `sync`.
 - It keeps rerun state in `openspec/changes/<change>/beads-handoff.json`.
-- `handoff` is now two-phase by existence of the saved handoff file:
-  - no handoff file yet: create the Beads mapping
-  - handoff file already exists: mirror Beads status back into the saved handoff and optionally `tasks.md`
-- `reconcile` reports stale work items that disappeared from `tasks.md` and preserves their old Beads IDs for manual review.
-- Dependency inference is still heuristic, but it now combines:
+- `sync` always updates local artifacts; no `--annotate-tasks` switch is required.
+- `tasks.md` annotations look like `[beads: bd-123 status: in_progress]`.
+- `sync` reports stale work items that disappeared from `tasks.md` and preserves their old Beads IDs for manual review.
+- Dependency inference is still heuristic, but it combines:
   - explicit `after` / `depends on` task references
   - shared vocabulary between foundational and later tasks
   - same-section / same-major-group relationships
-- It expects an initialized Beads workspace for `handoff` or `reconcile` without `--dry-run`.
+- It expects an initialized Beads workspace for `sync` without `--dry-run`.

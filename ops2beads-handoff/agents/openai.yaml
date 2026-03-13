@@ -1,4 +1,4 @@
 interface:
   display_name: "OpenSpec Beads Handoff"
   short_description: "Plan and sync OpenSpec work into Beads"
-  default_prompt: "Use $ops2beads-handoff to inspect, hand off, or reconcile an OpenSpec change into Beads."
+  default_prompt: "Use $ops2beads-handoff to inspect or sync an OpenSpec change into Beads."

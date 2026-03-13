@@ -722,7 +722,9 @@ def annotate_tasks_file(project_root: Path, plan: dict[str, Any]) -> Path:
         if beads_id:
             status_suffix = f" status: {beads_status}" if beads_status else ""
             clean_body = f"{clean_body} [beads: {beads_id}{status_suffix}]"
-        done = parsed.done or beads_status == "closed"
+            done = beads_status == "closed"
+        else:
+            done = parsed.done
         updated_lines.append(f"{parsed.indent}- [{'x' if done else ' '}] {clean_body}")
     path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
     return path
@@ -770,7 +772,7 @@ def render_summary(plan: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def save_plan(project_root: Path, plan: dict[str, Any], annotate_tasks: bool = False) -> None:
+def save_plan(project_root: Path, plan: dict[str, Any], annotate_tasks: bool = True) -> None:
     refresh_plan_statuses(project_root, plan)
     write_json(handoff_path(project_root, plan["changeName"]), plan)
     summary_path(project_root, plan["changeName"]).write_text(render_summary(plan), encoding="utf-8")
@@ -845,34 +847,45 @@ def build_merged_plan(project_root: Path, change_name: str, allow_task_only: boo
     return merge_previous_ids(current, previous)
 
 
+def resolve_change_target(target: str, project_root: Path) -> tuple[Path, str]:
+    candidate = Path(target).expanduser()
+    if candidate.exists():
+        resolved = candidate.resolve()
+        if not resolved.is_dir():
+            raise Ops2BeadsError(f"Change target must be a directory or change id: {target}")
+        if not (resolved / "proposal.md").exists() or not (resolved / "tasks.md").exists():
+            raise Ops2BeadsError(f"Directory does not look like an OpenSpec change: {resolved}")
+        if resolved.parent.name != "changes" or resolved.parent.parent.name != "openspec":
+            raise Ops2BeadsError(
+                f"Change directory must be under <project>/openspec/changes/<change>: {resolved}"
+            )
+        return resolved.parent.parent.parent, resolved.name
+    return project_root.resolve(), target
+
+
+def prepare_args(args: argparse.Namespace) -> argparse.Namespace:
+    project_root, change_name = resolve_change_target(args.change_target, args.project_root.resolve())
+    args.project_root = project_root
+    args.change = change_name
+    return args
+
+
 def do_inspect(args: argparse.Namespace) -> int:
     plan = build_plan(args.project_root, args.change, allow_task_only=args.allow_task_only)
     print(json.dumps(plan, indent=2) if args.json else human_plan_summary(plan))
     return 0
 
 
-def do_plan(args: argparse.Namespace) -> int:
-    plan = build_merged_plan(args.project_root, args.change, args.allow_task_only)
-    save_plan(args.project_root, plan, annotate_tasks=args.annotate_tasks)
-    print(json.dumps(plan, indent=2) if args.json else f"Wrote {handoff_path(args.project_root, args.change)}")
-    return 0
-
-
-def do_handoff(args: argparse.Namespace) -> int:
+def do_sync(args: argparse.Namespace) -> int:
     existing = load_existing_handoff(args.project_root, args.change)
-    if existing:
-        refresh_plan_statuses(args.project_root, existing)
+    if existing is None:
+        plan = build_merged_plan(args.project_root, args.change, args.allow_task_only)
         if args.dry_run:
-            print(json.dumps(existing, indent=2) if args.json else human_plan_summary(existing))
+            print(json.dumps(plan, indent=2) if args.json else human_plan_summary(plan))
             return 0
-        write_json(handoff_path(args.project_root, args.change), existing)
-        if args.annotate_tasks:
-            annotate_tasks_file(args.project_root, existing)
-        print(
-            json.dumps(existing, indent=2)
-            if args.json
-            else f"Handoff already exists; mirrored Beads status into {handoff_path(args.project_root, args.change)}"
-        )
+        execute_reconcile(args.project_root, plan)
+        save_plan(args.project_root, plan)
+        print(json.dumps(plan, indent=2) if args.json else f"Synced change {args.change}: bootstrapped Beads handoff")
         return 0
 
     plan = build_merged_plan(args.project_root, args.change, args.allow_task_only)
@@ -880,34 +893,18 @@ def do_handoff(args: argparse.Namespace) -> int:
         print(json.dumps(plan, indent=2) if args.json else human_plan_summary(plan))
         return 0
     execute_reconcile(args.project_root, plan)
-    save_plan(args.project_root, plan, annotate_tasks=args.annotate_tasks)
-    print(json.dumps(plan, indent=2) if args.json else f"Handoff complete. Wrote {handoff_path(args.project_root, args.change)}")
-    return 0
-
-
-def do_reconcile(args: argparse.Namespace) -> int:
-    existing = load_existing_handoff(args.project_root, args.change)
-    if not existing:
-        raise Ops2BeadsError(
-            f"No existing handoff file at {handoff_path(args.project_root, args.change)}; run 'plan' or 'handoff' first"
-        )
-    plan = build_merged_plan(args.project_root, args.change, args.allow_task_only)
-    if args.dry_run:
-        print(json.dumps(plan, indent=2) if args.json else human_plan_summary(plan))
-        return 0
-    execute_reconcile(args.project_root, plan)
-    save_plan(args.project_root, plan, annotate_tasks=args.annotate_tasks)
-    print(json.dumps(plan, indent=2) if args.json else f"Reconciled {handoff_path(args.project_root, args.change)}")
+    save_plan(args.project_root, plan)
+    print(json.dumps(plan, indent=2) if args.json else f"Synced change {args.change}: reconciled plan and mirrored Beads status")
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Translate OpenSpec change artifacts into a Beads handoff plan")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser = argparse.ArgumentParser(description="Translate OpenSpec change artifacts into Beads state")
+    subparsers = parser.add_subparsers(dest="command")
 
     def add_common(subparser: argparse.ArgumentParser) -> None:
-        subparser.add_argument("--change", required=True, help="OpenSpec change name")
-        subparser.add_argument("--project-root", type=Path, default=Path.cwd(), help="Target project root (default: cwd)")
+        subparser.add_argument("change_target", help="OpenSpec change id or path to openspec/changes/<change>")
+        subparser.add_argument("--project-root", type=Path, default=Path.cwd(), help="Project root when passing a change id (default: cwd)")
         subparser.add_argument("--allow-task-only", action="store_true", help="Allow planning without specs/")
         subparser.add_argument("--json", action="store_true", help="Emit JSON to stdout")
 
@@ -915,23 +912,10 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(inspect_parser)
     inspect_parser.set_defaults(func=do_inspect)
 
-    plan_parser = subparsers.add_parser("plan", help="Write beads-handoff.json and beads-summary.md")
-    add_common(plan_parser)
-    plan_parser.add_argument("--annotate-tasks", action="store_true", help="Update tasks.md with [beads: ...] tags")
-    plan_parser.set_defaults(func=do_plan)
-
-    handoff_parser = subparsers.add_parser("handoff", help="First run: create Beads issues. Later runs: mirror Beads status into the saved handoff and optionally tasks.md")
-    add_common(handoff_parser)
-    handoff_parser.add_argument("--dry-run", action="store_true", help="Do not mutate Beads or write mirrored output")
-    handoff_parser.add_argument("--annotate-tasks", action="store_true", help="Update tasks.md with [beads: ...] tags")
-    handoff_parser.add_argument("--yes", action="store_true", help="Accepted for compatibility; handoff is non-interactive")
-    handoff_parser.set_defaults(func=do_handoff)
-
-    reconcile_parser = subparsers.add_parser("reconcile", help="Rebuild plan and reconcile an existing handoff with Beads")
-    add_common(reconcile_parser)
-    reconcile_parser.add_argument("--dry-run", action="store_true", help="Do not mutate Beads")
-    reconcile_parser.add_argument("--annotate-tasks", action="store_true", help="Update tasks.md with [beads: ...] tags")
-    reconcile_parser.set_defaults(func=do_reconcile)
+    sync_parser = subparsers.add_parser("sync", help="Sync OpenSpec planning into Beads and Beads status back into local artifacts")
+    add_common(sync_parser)
+    sync_parser.add_argument("--dry-run", action="store_true", help="Do not mutate Beads or rewrite local artifacts")
+    sync_parser.set_defaults(func=do_sync)
 
     return parser
 
@@ -939,8 +923,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    args.project_root = args.project_root.resolve()
+    if not getattr(args, "command", None):
+        parser.print_help()
+        return 2
     try:
+        args = prepare_args(args)
         return args.func(args)
     except Ops2BeadsError as exc:
         print(f"error: {exc}", file=sys.stderr)
