@@ -1,162 +1,150 @@
 ---
 name: beads:apply-openspec-change
-description: Execute an OpenSpec change through Beads by syncing tasks into Beads, working ready items, and syncing status back into OpenSpec.
+description: Implement an OpenSpec change through Beads by syncing tasks into Beads, working ready items, and syncing status back into OpenSpec.
 arguments: "[change-name]"
 ---
 
 Implement an OpenSpec change through **Beads** instead of the stock `/opsx:apply` task-checkbox loop.
 
-## Purpose
+This command wraps the Beads-backed implementation flow:
+- `ops2beads inspect`
+- `ops2beads sync`
+- `br ready` / claim / implement / close
+- `ops2beads sync` back into `tasks.md`
 
-Use this command when:
-- the change is already planned in OpenSpec
-- `tasks.md` exists and is ready for implementation
-- Beads (`br`) should be the execution tracker
+When all implementation work is complete, the next step is usually `/opsx:archive`.
 
-This command is the Beads-backed implementation flow:
+---
 
-```text
-OpenSpec plan → ops2beads inspect/sync → br execution loop → ops2beads sync back
-```
+**Input**: Optionally specify a change name (e.g. `/beads:apply-openspec-change add-dark-mode`). If omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST ask the user to choose an active change.
 
-## Input
+**Steps**
 
-Optionally specify a change name, for example:
+1. **Select the change**
 
-```text
-/beads:apply-openspec-change add-dark-mode
-```
+   If a name is provided, use it. Otherwise:
+   - infer from conversation context if the user mentioned a change
+   - auto-select if only one active change exists
+   - if ambiguous, inspect available changes and ask the user to choose
 
-If no change name is provided:
-- infer it from conversation context if possible
-- auto-select if only one active change exists
-- otherwise ask the user to choose
+   Always announce: `Using change: <name>` and how to override it.
 
-Always announce:
+2. **Check that the change is ready for Beads-backed implementation**
 
-```text
-Using change: <name>
-```
+   Verify:
+   - `openspec/changes/<name>/` exists
+   - the change has `tasks.md`
+   - `br` is installed and available
+   - Beads is initialized in the repo before the first real sync
 
-and mention how to override it.
+   If Beads is not initialized, explain that `br init` is required before the first non-dry-run sync.
 
-## Preconditions
+3. **Inspect the OpenSpec change first**
 
-Before proceeding, verify:
-- the repo contains `openspec/changes/<name>/`
-- `tasks.md` exists for the change
-- `br` is installed and available
-- Beads is initialized in the repo if a real sync will be performed
+   Run:
 
-If Beads is not initialized, explain that `br init` is required before the first real sync.
+   ```bash
+   python3 skills/openspec2beads/scripts/ops2beads.py inspect <name> --json
+   ```
 
-## Workflow
+   Summarize:
+   - `warnings`
+   - `analysisWarnings`
+   - `suggestedGaps`
+   - `readiness`
 
-### 1. Inspect the OpenSpec change
+   **Handle states:**
+   - If inspect shows serious planning gaps, pause and recommend refining OpenSpec first
+   - If inspect is broadly acceptable, proceed to sync
+   - If the user wants review before mutation, offer a dry-run sync
 
-Run `ops2beads inspect` first.
+   Important policy:
+   - `inspect` is advisory only
+   - do not create Beads work from inspect suggestions alone
+   - only explicit OpenSpec tasks should become Beads issues
 
-Preferred command:
+4. **Sync OpenSpec tasks into Beads**
 
-```bash
-python3 skills/openspec2beads/scripts/ops2beads.py inspect <change-name> --json
-```
+   If the user wants a preview first, run:
 
-Summarize:
-- warnings
-- task-quality issues
-- suggested planning gaps
-- readiness
+   ```bash
+   python3 skills/openspec2beads/scripts/ops2beads.py sync <name> --dry-run --json
+   ```
 
-Important policy:
-- `inspect` is advisory only
-- do not invent new Beads issues from inspect suggestions
-- if important planning gaps exist, recommend refining OpenSpec first
+   For a real sync, run:
 
-If the result shows serious planning issues, pause and ask whether to:
-1. refine OpenSpec artifacts first
-2. do a dry-run sync anyway
-3. proceed with sync as-is
+   ```bash
+   python3 skills/openspec2beads/scripts/ops2beads.py sync <name> --json
+   ```
 
-### 2. Preview or perform sync
+   After sync:
+   - treat Beads as the execution tracker
+   - use Beads state as the source of truth for completion
+   - expect `tasks.md` to be updated by later syncs
 
-If the user wants a preview, run:
+5. **Read current execution state from Beads**
 
-```bash
-python3 skills/openspec2beads/scripts/ops2beads.py sync <change-name> --dry-run --json
-```
+   Start from ready work:
 
-For a real sync, run:
+   ```bash
+   br ready
+   ```
 
-```bash
-python3 skills/openspec2beads/scripts/ops2beads.py sync <change-name> --json
-```
+   Then inspect the next relevant item:
 
-After sync, treat Beads as the execution tracker.
+   ```bash
+   br show <id>
+   ```
 
-### 3. Read current execution state from Beads
+   If useful, also read:
+   - `openspec/changes/<name>/beads-summary.md`
+   - `openspec/changes/<name>/tasks.md`
 
-Check ready work first.
+6. **Implement ready Beads items (loop until done or blocked)**
 
-Typical commands:
+   For each ready item:
+   - show which Beads item is being worked on
+   - inspect it with `br show <id>`
+   - claim or start it
+   - implement the required code changes
+   - run relevant checks/tests when appropriate
+   - close the item when complete
 
-```bash
-br ready
-br show <id>
-```
+   Typical commands:
 
-If useful, also inspect the OpenSpec-side outputs:
-- `openspec/changes/<name>/beads-summary.md`
-- `openspec/changes/<name>/tasks.md`
+   ```bash
+   br update <id> --claim
+   br close <id> --reason "Completed"
+   ```
 
-### 4. Work the next ready Beads item
+   **Pause if:**
+   - the Beads item is unclear
+   - implementation reveals a planning or design issue
+   - no item is ready
+   - a blocker or command failure occurs
+   - the user interrupts
 
-When a ready item exists:
-- select the next ready item
-- inspect it with `br show <id>`
-- claim or move it into progress
-- implement the task in code
-- run relevant checks/tests when appropriate
-- close the Beads item when complete
+7. **Sync status back into OpenSpec**
 
-Typical commands:
+   After completing one or more Beads items, run:
 
-```bash
-br update <id> --claim
-br close <id> --reason "Completed"
-```
+   ```bash
+   python3 skills/openspec2beads/scripts/ops2beads.py sync <name> --json
+   ```
 
-If the item is unclear, blocked, or reveals a planning/design problem:
-- do not guess
-- pause and explain the issue
-- recommend updating OpenSpec artifacts if needed
+   This mirrors Beads IDs and statuses back into `tasks.md`.
 
-### 5. Sync back into OpenSpec
+8. **On completion or pause, show status**
 
-After completing one or more Beads items, run:
+   Display:
+   - change name
+   - inspect/sync summary
+   - Beads items completed this session
+   - overall progress
+   - if all work appears done, suggest `/opsx:archive <name>`
+   - if paused, explain why and wait for guidance
 
-```bash
-python3 skills/openspec2beads/scripts/ops2beads.py sync <change-name> --json
-```
-
-This mirrors Beads IDs/status back into `tasks.md`.
-
-### 6. Continue until done or paused
-
-Keep looping while there is ready work and no blocker:
-- inspect/sync if needed
-- pick ready Beads work
-- implement
-- close item
-- sync back
-
-Pause if:
-- no ready Beads items exist
-- implementation reveals a design/spec/task problem
-- the user needs to make a planning decision
-- a command fails or the environment is not ready
-
-## Authority model
+**Authority Model**
 
 Use this mental model throughout:
 
@@ -169,48 +157,66 @@ Use this mental model throughout:
   - open / in_progress / closed
   - what is actually complete
 
-Implications:
+Expected implications:
 - if the user wants a new Beads issue, add it to OpenSpec first, then sync
-- if `inspect` suggests a missing test task, that stays advisory until added to OpenSpec
+- if inspect suggests missing tests or rollback work, that stays advisory until added to OpenSpec
 - if Beads and `tasks.md` disagree, Beads wins on sync
 
-## Expected outputs
-
-During execution, report concise progress such as:
+**Output During Implementation**
 
 ```text
-Using change: add-dark-mode
+## Implementing via Beads: <change-name>
+
+Using change: <change-name>
 Inspect says the plan is ready to sync, with one advisory suggestion about test coverage.
 Synced OpenSpec tasks into Beads.
-Next ready item: bd-123 Create ThemeContext.
-Claimed bd-123 and starting implementation.
-Completed bd-123 and synced status back into tasks.md.
+
+Working on Beads item bd-123: <task description>
+[...implementation happening...]
+✓ Beads item complete
+✓ Synced status back into tasks.md
 ```
 
-If blocked, report clearly:
+**Output On Completion**
 
 ```text
-Implementation paused for add-dark-mode.
-Reason: the next Beads item depends on a missing OpenSpec task split.
-Options:
-1. refine tasks.md first
-2. continue with a dry-run review
-3. stop here
-```
+## Beads Implementation Complete
 
-If all work is complete, suggest:
+**Change:** <change-name>
+**Progress:** all synced Beads items complete
 
-```text
-All Beads items for <change-name> appear complete and status has been synced back into OpenSpec.
+### Completed This Session
+- [x] bd-123 Task 1
+- [x] bd-124 Task 2
+
+All current Beads work is complete and status has been synced back into OpenSpec.
 Next step: /opsx:archive <change-name>
 ```
 
-## Guardrails
+**Output On Pause (Issue Encountered)**
+
+```text
+## Beads Implementation Paused
+
+**Change:** <change-name>
+
+### Issue Encountered
+<description of the issue>
+
+**Options:**
+1. refine OpenSpec artifacts first
+2. review a dry-run sync
+3. stop here
+
+What would you like to do?
+```
+
+**Guardrails**
 
 - always run `inspect` before the first real sync in a session
-- prefer a dry-run sync when the user wants review before mutation
+- prefer dry-run sync when the user wants review before mutation
 - do not create Beads work that is not explicit in OpenSpec
-- do not mark OpenSpec tasks done manually when Beads is the source of execution truth
+- do not manually check off OpenSpec tasks when Beads is the execution source of truth
 - sync back into OpenSpec after implementation progress
 - pause on ambiguity, blockers, or planning drift
-- keep code changes scoped to the current Beads item
+- keep code changes minimal and scoped to the current Beads item
