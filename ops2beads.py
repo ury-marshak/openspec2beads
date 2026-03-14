@@ -92,6 +92,65 @@ STOPWORDS = {
     "state",
 }
 
+SETUP_KEYWORDS = {
+    "setup",
+    "configure",
+    "config",
+    "install",
+    "schema",
+    "migration",
+    "migrate",
+    "database",
+    "db",
+    "env",
+    "environment",
+    "infrastructure",
+    "bootstrap",
+}
+TEST_KEYWORDS = {"test", "tests", "testing", "validate", "verification", "integration", "unit", "e2e"}
+DOC_KEYWORDS = {"document", "documentation", "docs", "readme"}
+IMPLEMENTATION_KEYWORDS = {
+    "implement",
+    "add",
+    "create",
+    "build",
+    "integrate",
+    "wire",
+    "connect",
+    "support",
+    "endpoint",
+    "service",
+    "feature",
+}
+POLISH_KEYWORDS = {"polish", "tooltip", "animation", "copy", "ui", "ux", "styling", "style"}
+HIGH_COMPLEXITY_KEYWORDS = {"migrate", "migration", "refactor", "redesign", "architect", "permissions", "auth"}
+API_KEYWORDS = {"api", "endpoint", "route", "handler", "http", "graphql", "rpc"}
+RATE_LIMITING_KEYWORDS = {"rate", "limit", "throttle", "quota"}
+MONITORING_KEYWORDS = {"metrics", "monitoring", "observability", "logging", "logs", "telemetry", "alerts"}
+ROLLBACK_KEYWORDS = {"rollback", "roll back", "backout", "revert"}
+EXTERNAL_SERVICE_KEYWORDS = {
+    "external",
+    "third-party",
+    "provider",
+    "webhook",
+    "upstream",
+    "downstream",
+    "stripe",
+    "slack",
+    "github",
+}
+RESILIENCE_KEYWORDS = {"retry", "timeout", "fallback", "circuit", "error", "errors", "failure", "resilience"}
+BROAD_TASK_PHRASES = {
+    "system",
+    "workflow",
+    "end-to-end",
+    "full",
+    "complete",
+    "dashboard",
+    "authentication",
+    "authorization",
+}
+
 
 class Ops2BeadsError(RuntimeError):
     pass
@@ -299,6 +358,186 @@ def overlap_score(a: set[str], b: set[str]) -> int:
     return len(a & b)
 
 
+def task_text(task: TaskRecord) -> str:
+    return f"{task.title} {(task.section or '')}".strip().lower()
+
+
+def task_title_text(task: TaskRecord) -> str:
+    return task.title.strip().lower()
+
+
+def task_section_text(task: TaskRecord) -> str:
+    return (task.section or "").strip().lower()
+
+
+def contains_keyword(text: str, keywords: set[str]) -> bool:
+    normalized = f" {text.lower()} "
+    return any(f" {keyword} " in normalized or keyword in normalized for keyword in keywords)
+
+
+def infer_suggested_type(task: TaskRecord) -> str:
+    title = task_title_text(task)
+    section = task_section_text(task)
+    if contains_keyword(title, DOC_KEYWORDS):
+        return "chore"
+    if contains_keyword(title, TEST_KEYWORDS):
+        return "task"
+    if contains_keyword(title, SETUP_KEYWORDS):
+        return "task"
+    if contains_keyword(title, IMPLEMENTATION_KEYWORDS):
+        return "feature"
+    if contains_keyword(section, {"setup", "infrastructure", "foundation"}):
+        return "task"
+    return "task"
+
+
+def infer_priority(task: TaskRecord) -> int:
+    title = task_title_text(task)
+    section = task_section_text(task)
+    if contains_keyword(title, SETUP_KEYWORDS):
+        return 0
+    if contains_keyword(title, POLISH_KEYWORDS):
+        return 2
+    if contains_keyword(title, IMPLEMENTATION_KEYWORDS | TEST_KEYWORDS | DOC_KEYWORDS | API_KEYWORDS):
+        return 1
+    if contains_keyword(section, {"setup", "infrastructure", "foundation"}):
+        return 1
+    return 2
+
+
+def infer_complexity(task: TaskRecord) -> str:
+    title = task_title_text(task)
+    if contains_keyword(title, HIGH_COMPLEXITY_KEYWORDS):
+        return "high"
+    if contains_keyword(title, {"migration", "migrate", "schema", "permissions", "auth"}):
+        return "high"
+    if contains_keyword(title, SETUP_KEYWORDS):
+        return "low"
+    if contains_keyword(title, IMPLEMENTATION_KEYWORDS | API_KEYWORDS):
+        return "medium"
+    return "medium"
+
+
+def task_looks_broad(task: TaskRecord) -> bool:
+    title = task.title.strip()
+    lower = title.lower()
+    if len(title) >= 72:
+        return True
+    if lower.count(" and ") >= 2:
+        return True
+    if contains_keyword(lower, BROAD_TASK_PHRASES) and (task.task_number is None or task.task_number.count(".") <= 1):
+        return True
+    tokens = tokenize(title)
+    return len(tokens) >= 8 and contains_keyword(lower, {"implement", "build", "create"})
+
+
+def build_suggested_gap(
+    *,
+    kind: str,
+    severity: str,
+    title: str,
+    reason: str,
+    suggested_action: str,
+    related_task_keys: list[str],
+) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "severity": severity,
+        "title": title,
+        "reason": reason,
+        "relatedTaskKeys": related_task_keys,
+        "suggestedAction": suggested_action,
+    }
+
+
+def analyze_plan(tasks: list[TaskRecord], work_items: list[dict[str, Any]]) -> tuple[list[str], list[dict[str, Any]], dict[str, Any]]:
+    warnings: list[str] = []
+    suggested_gaps: list[dict[str, Any]] = []
+
+    implementation_tasks = [task for task in tasks if infer_suggested_type(task) == "feature"]
+    test_tasks = [task for task in tasks if contains_keyword(task_text(task), TEST_KEYWORDS)]
+    migration_tasks = [task for task in tasks if contains_keyword(task_text(task), {"migration", "migrate", "schema", "database", "db"})]
+    rollback_tasks = [task for task in tasks if contains_keyword(task_text(task), ROLLBACK_KEYWORDS)]
+    api_tasks = [task for task in tasks if contains_keyword(task_text(task), API_KEYWORDS)]
+    monitoring_tasks = [task for task in tasks if contains_keyword(task_text(task), MONITORING_KEYWORDS)]
+    rate_limit_tasks = [task for task in tasks if contains_keyword(task_text(task), RATE_LIMITING_KEYWORDS)]
+    external_tasks = [task for task in tasks if contains_keyword(task_text(task), EXTERNAL_SERVICE_KEYWORDS)]
+    resilience_tasks = [task for task in tasks if contains_keyword(task_text(task), RESILIENCE_KEYWORDS)]
+
+    broad_tasks = [task for task in tasks if task_looks_broad(task)]
+    for task in broad_tasks:
+        warnings.append(f"Task {task.task_number or task.key} looks broad and may need decomposition before implementation.")
+
+    if implementation_tasks and not test_tasks:
+        suggested_gaps.append(
+            build_suggested_gap(
+                kind="missing-tests",
+                severity="medium",
+                title="Add explicit tests for implementation work",
+                reason="Implementation-oriented tasks exist but no test-oriented tasks were found in tasks.md.",
+                suggested_action="Add explicit test tasks to OpenSpec tasks.md before sync.",
+                related_task_keys=[task.key for task in implementation_tasks],
+            )
+        )
+
+    if migration_tasks and not rollback_tasks:
+        suggested_gaps.append(
+            build_suggested_gap(
+                kind="missing-rollback",
+                severity="medium",
+                title="Add rollback or backout coverage for migration work",
+                reason="Migration or schema-changing tasks were found without any rollback-style task.",
+                suggested_action="Add a rollback/backout task or note why rollback is unnecessary before sync.",
+                related_task_keys=[task.key for task in migration_tasks],
+            )
+        )
+
+    if api_tasks and not monitoring_tasks:
+        suggested_gaps.append(
+            build_suggested_gap(
+                kind="missing-monitoring",
+                severity="low",
+                title="Add monitoring/logging coverage for API work",
+                reason="API-oriented tasks exist but no explicit monitoring, metrics, or logging work was found.",
+                suggested_action="Consider adding monitoring/logging tasks to OpenSpec before sync.",
+                related_task_keys=[task.key for task in api_tasks],
+            )
+        )
+    if api_tasks and not rate_limit_tasks:
+        suggested_gaps.append(
+            build_suggested_gap(
+                kind="missing-rate-limiting",
+                severity="low",
+                title="Review whether rate limiting or throttling is needed",
+                reason="API-oriented tasks exist but no rate-limiting or throttling work was found.",
+                suggested_action="If the endpoint is externally reachable or abuse-sensitive, add rate-limiting coverage in OpenSpec.",
+                related_task_keys=[task.key for task in api_tasks],
+            )
+        )
+
+    if external_tasks and not resilience_tasks:
+        suggested_gaps.append(
+            build_suggested_gap(
+                kind="missing-resilience",
+                severity="medium",
+                title="Add retry/timeout/error-handling coverage for external integrations",
+                reason="External-service work was found without explicit resilience or error-handling tasks.",
+                suggested_action="Consider adding timeout, retry, fallback, or error-handling work to OpenSpec before sync.",
+                related_task_keys=[task.key for task in external_tasks],
+            )
+        )
+
+    if not warnings and not suggested_gaps:
+        readiness = {"readyToSync": True, "summary": "No advisory planning concerns detected."}
+    else:
+        readiness = {
+            "readyToSync": True,
+            "summary": f"Sync is possible, but review {len(warnings)} warning(s) and {len(suggested_gaps)} suggested gap(s) first.",
+        }
+
+    return warnings, suggested_gaps, readiness
+
+
 def infer_dependencies(tasks: list[TaskRecord]) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
     by_number = {task.task_number: task for task in tasks if task.task_number}
     deps: dict[str, list[str]] = {task.key: [] for task in tasks}
@@ -413,7 +652,10 @@ def fingerprint_work_item(item: dict[str, Any]) -> str:
         "title": item["title"],
         "description": item["description"],
         "type": item["type"],
+        "suggestedType": item.get("suggestedType"),
         "priority": item["priority"],
+        "complexity": item.get("complexity"),
+        "origin": item.get("origin"),
         "labels": sorted(item["labels"]),
         "dependsOn": sorted(item["dependsOn"]),
         "acceptance": item.get("acceptance", []),
@@ -502,18 +744,23 @@ def build_plan(project_root: Path, change_name: str, allow_task_only: bool = Fal
     work_items: list[dict[str, Any]] = []
     for task in tasks:
         acceptance = select_acceptance(requirements, task)
+        complexity = infer_complexity(task)
         labels = list(change_labels)
         if len(common_capability_labels) == 1:
             labels.extend(common_capability_labels)
         if task.section:
             labels.append(f"section:{slugify(task.section)}")
+        labels.append(f"complexity:{complexity}")
         work_item = {
             "key": task.key,
             "taskNumber": task.task_number,
             "title": task.title,
             "description": build_description(change_name, task, acceptance, capabilities),
             "type": "task",
-            "priority": 2,
+            "suggestedType": infer_suggested_type(task),
+            "priority": infer_priority(task),
+            "complexity": complexity,
+            "origin": "openspec-task",
             "labels": sorted(dict.fromkeys(labels)),
             "dependsOn": dependencies.get(task.key, []),
             "dependencyReasons": dependency_reasons.get(task.key, []),
@@ -527,6 +774,7 @@ def build_plan(project_root: Path, change_name: str, allow_task_only: bool = Fal
         work_items.append(work_item)
 
     compute_waves(work_items)
+    analysis_warnings, suggested_gaps, readiness = analyze_plan(tasks, work_items)
 
     return {
         "changeName": change_name,
@@ -542,11 +790,21 @@ def build_plan(project_root: Path, change_name: str, allow_task_only: bool = Fal
         "changeLabels": change_labels,
         "capabilities": capabilities,
         "warnings": ([] if design_exists else ["design.md missing; dependency inference is reduced"]),
+        "analysisWarnings": analysis_warnings,
+        "suggestedGaps": suggested_gaps,
+        "readiness": readiness,
         "summary": {
             "taskCount": len(work_items),
             "completedTasksInTasksMd": sum(1 for task in tasks if task.done),
             "dependencyCount": sum(len(item["dependsOn"]) for item in work_items),
             "maxWave": max(item["wave"] for item in work_items) if work_items else 0,
+            "priorityBreakdown": {
+                "p0": sum(1 for item in work_items if item["priority"] == 0),
+                "p1": sum(1 for item in work_items if item["priority"] == 1),
+                "p2": sum(1 for item in work_items if item["priority"] >= 2),
+            },
+            "suggestedGapCount": len(suggested_gaps),
+            "analysisWarningCount": len(analysis_warnings),
         },
         "epic": {
             "title": f"Implement OpenSpec change {change_name}",
@@ -738,12 +996,29 @@ def render_summary(plan: dict[str, Any]) -> str:
         f"- Schema: `{plan['schemaName']}`",
         f"- Generated: `{plan['generatedAt']}`",
     ]
+    readiness = plan.get("readiness") or {}
+    if readiness.get("summary"):
+        lines.append(f"- Readiness: {readiness['summary']}")
     if plan.get("epic", {}).get("beadsId"):
         lines.append(f"- Epic: `{plan['epic']['beadsId']}` — {plan['epic']['title']}")
     lines.append("")
     if plan.get("warnings"):
         lines.append("## Warnings")
         lines.extend(f"- {warning}" for warning in plan["warnings"])
+        lines.append("")
+    if plan.get("analysisWarnings"):
+        lines.append("## Analysis warnings")
+        lines.extend(f"- {warning}" for warning in plan["analysisWarnings"])
+        lines.append("")
+    if plan.get("suggestedGaps"):
+        lines.append("## Suggested gaps")
+        for gap in plan["suggestedGaps"]:
+            related = ", ".join(gap.get("relatedTaskKeys", [])) or "none"
+            lines.append(f"- **{gap['title']}** [{gap['severity']}]")
+            lines.append(f"  - kind: `{gap['kind']}`")
+            lines.append(f"  - reason: {gap['reason']}")
+            lines.append(f"  - related tasks: {related}")
+            lines.append(f"  - suggested action: {gap['suggestedAction']}")
         lines.append("")
     if plan.get("staleItems"):
         lines.append("## Stale items")
@@ -762,7 +1037,11 @@ def render_summary(plan: dict[str, Any]) -> str:
             deps = ", ".join(item.get("dependsOn", [])) or "none"
             reasons = "; ".join(item.get("dependencyReasons", [])) or "none"
             prefix = item.get("taskNumber") or item["key"]
-            lines.append(f"- `{beads}` `{prefix}` {item['title']} _(depends on: {deps}; reasons: {reasons})_")
+            lines.append(
+                f"- `{beads}` `{prefix}` {item['title']} _"
+                f"(priority: p{item['priority']}; suggested type: {item.get('suggestedType', item['type'])}; "
+                f"complexity: {item.get('complexity', 'unknown')}; depends on: {deps}; reasons: {reasons})_"
+            )
     lines.extend([
         "",
         "## Next commands",
@@ -786,15 +1065,35 @@ def human_plan_summary(plan: dict[str, Any]) -> str:
         f"Schema: {plan['schemaName']}",
         f"Work items: {len(plan['workItems'])}",
         f"Dependencies: {plan['summary']['dependencyCount']}",
+        (
+            "Priority breakdown: "
+            f"p0={plan['summary']['priorityBreakdown']['p0']}, "
+            f"p1={plan['summary']['priorityBreakdown']['p1']}, "
+            f"p2={plan['summary']['priorityBreakdown']['p2']}"
+        ),
     ]
+    readiness = plan.get("readiness") or {}
+    if readiness.get("summary"):
+        lines.append(f"Readiness: {readiness['summary']}")
     for warning in plan.get("warnings", []):
         lines.append(f"Warning: {warning}")
+    for warning in plan.get("analysisWarnings", []):
+        lines.append(f"Analysis warning: {warning}")
+    if plan.get("suggestedGaps"):
+        lines.append("Suggested gaps:")
+        for gap in plan["suggestedGaps"]:
+            lines.append(f"- [{gap['severity']}] {gap['title']} ({gap['kind']})")
+            lines.append(f"  reason: {gap['reason']}")
+            lines.append(f"  suggested action: {gap['suggestedAction']}")
     if plan.get("staleItems"):
         lines.append(f"Stale items: {len(plan['staleItems'])}")
     for item in plan["workItems"]:
         deps = ", ".join(item["dependsOn"]) or "none"
         prefix = item.get("taskNumber") or item["key"]
-        lines.append(f"- [{item['wave']}] {prefix} {item['title']} (deps: {deps})")
+        lines.append(
+            f"- [{item['wave']}] {prefix} {item['title']} "
+            f"(deps: {deps}; p{item['priority']}; type: {item.get('suggestedType', item['type'])}; complexity: {item.get('complexity', 'unknown')})"
+        )
     return "\n".join(lines)
 
 

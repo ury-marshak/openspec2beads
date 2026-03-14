@@ -141,7 +141,71 @@ class Ops2BeadsCliTests(unittest.TestCase):
         self.assertIn("1.3", by_number["2.4"]["dependsOn"])
         self.assertTrue(by_number["2.2"]["dependencyReasons"])
 
+        self.assertIn("analysisWarnings", payload)
+        self.assertIn("suggestedGaps", payload)
+        self.assertIn("readiness", payload)
+        self.assertTrue(payload["readiness"]["readyToSync"])
+        self.assertEqual(payload["summary"]["suggestedGapCount"], 1)
+        self.assertEqual(payload["summary"]["analysisWarningCount"], 0)
+        self.assertEqual(by_number["1.1"]["suggestedType"], "feature")
+        self.assertEqual(by_number["1.1"]["priority"], 1)
+        self.assertEqual(by_number["1.1"]["complexity"], "medium")
+        self.assertEqual(by_number["1.1"]["origin"], "openspec-task")
+        self.assertIn("complexity:medium", by_number["1.1"]["labels"])
+        self.assertEqual(payload["suggestedGaps"][0]["kind"], "missing-tests")
+
         self.assertFalse(self.handoff_file().exists())
+
+    def test_inspect_infers_priority_type_complexity_across_task_shapes(self) -> None:
+        self.write_tasks(
+            """\
+            # Tasks
+
+            ## 1. Backend
+            - [ ] 1.1 Create users table migration
+            - [ ] 1.2 Implement registration endpoint after 1.1
+            - [ ] 1.3 Write integration tests for registration endpoint
+            - [ ] 1.4 Document auth API flow
+            """
+        )
+
+        proc = self.run_cli("inspect", "add-dark-mode", "--json")
+        payload = json.loads(proc.stdout)
+        by_number = {item["taskNumber"]: item for item in payload["workItems"]}
+
+        self.assertEqual(by_number["1.1"]["priority"], 0)
+        self.assertEqual(by_number["1.1"]["complexity"], "high")
+        self.assertEqual(by_number["1.1"]["suggestedType"], "task")
+        self.assertEqual(by_number["1.2"]["priority"], 1)
+        self.assertEqual(by_number["1.2"]["suggestedType"], "feature")
+        self.assertEqual(by_number["1.2"]["complexity"], "medium")
+        self.assertEqual(by_number["1.3"]["priority"], 1)
+        self.assertEqual(by_number["1.3"]["suggestedType"], "task")
+        self.assertEqual(by_number["1.4"]["priority"], 1)
+        self.assertEqual(by_number["1.4"]["suggestedType"], "chore")
+
+    def test_inspect_reports_broad_task_and_missing_rollback_gaps(self) -> None:
+        self.write_tasks(
+            """\
+            # Tasks
+
+            ## 1. Auth
+            - [ ] 1.1 Implement complete authentication system with login, refresh, logout, roles, and permissions
+            - [ ] 1.2 Create users table migration
+            - [ ] 1.3 Implement registration endpoint after 1.2
+            """
+        )
+
+        proc = self.run_cli("inspect", "add-dark-mode", "--json")
+        payload = json.loads(proc.stdout)
+
+        self.assertTrue(payload["analysisWarnings"])
+        self.assertTrue(any("Task 1.1 looks broad" in warning for warning in payload["analysisWarnings"]))
+        gap_kinds = {item["kind"] for item in payload["suggestedGaps"]}
+        self.assertIn("missing-tests", gap_kinds)
+        self.assertIn("missing-rollback", gap_kinds)
+        self.assertIn("missing-monitoring", gap_kinds)
+        self.assertIn("missing-rate-limiting", gap_kinds)
 
     def test_sync_bootstraps_once_then_mirrors_without_duplicates(self) -> None:
         self.init_beads()
@@ -234,6 +298,31 @@ class Ops2BeadsCliTests(unittest.TestCase):
         payload = json.loads(proc.stdout)
         self.assertEqual(payload["changeName"], "add-dark-mode")
         self.assertTrue(self.handoff_file().exists())
+
+    def test_sync_does_not_create_beads_issues_from_suggested_gaps(self) -> None:
+        self.write_tasks(
+            """\
+            # Tasks
+
+            ## 1. Auth
+            - [ ] 1.1 Create users table migration
+            - [ ] 1.2 Implement registration endpoint after 1.1
+            """
+        )
+        inspect_payload = json.loads(self.run_cli("inspect", "add-dark-mode", "--json").stdout)
+        self.assertGreaterEqual(len(inspect_payload["suggestedGaps"]), 1)
+
+        self.init_beads()
+        self.run_cli("sync", "add-dark-mode")
+
+        issues = self.list_issues()
+        self.assertEqual(len(issues), 3)
+        issue_titles = {issue["title"] for issue in issues}
+        self.assertIn("Implement OpenSpec change add-dark-mode", issue_titles)
+        self.assertIn("Create users table migration", issue_titles)
+        self.assertIn("Implement registration endpoint after 1.1", issue_titles)
+        self.assertFalse(any("Add explicit tests" in title for title in issue_titles))
+        self.assertFalse(any("rollback" in title.lower() for title in issue_titles))
 
 
 if __name__ == "__main__":
