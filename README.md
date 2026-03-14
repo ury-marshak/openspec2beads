@@ -2,6 +2,8 @@
 
 Use this when you want to keep **OpenSpec** as the planning system, but use **Beads** (`br`) for the implementation stage.
 
+Use `/beads:apply-openspec-change` instead of stock `/opsx:apply` for Beads-backed implementation.
+
 Workflow:
 
 ```text
@@ -9,16 +11,15 @@ Workflow:
     ↓
 refine proposal.md / specs/ / design.md / tasks.md
     ↓
-ops2beads inspect
-    ↓
-ops2beads sync
-    ↓
-br execution loop
-(ready → claim → implement → close)
-    ↓
-ops2beads sync
+/beads:apply-openspec-change
     ↓
 /opsx:archive
+```
+
+`/beads:apply-openspec-change` is the Beads-backed implementation step. It wraps the main loop:
+
+```text
+ops2beads inspect → ops2beads sync → br ready/claim/implement/close → ops2beads sync back
 ```
 
 ## What goes where
@@ -37,6 +38,10 @@ This tool syncs explicit OpenSpec tasks into Beads, then syncs Beads status back
 Main script:
 
 - `skills/openspec2beads/scripts/ops2beads.py`
+
+Command draft in this repo:
+
+- `commands/beads-apply-openspec-change.md`
 
 ## Before you start
 
@@ -59,92 +64,53 @@ br init
 /opsx:propose add-dark-mode
 ```
 
-### 2. Inspect the plan
+### 2. Run the Beads-backed implementation command
 
 ```text
-Use openspec2beads to inspect change add-dark-mode and summarize anything I should fix before syncing to Beads.
+/beads:apply-openspec-change add-dark-mode
 ```
 
-```bash
-python3 skills/openspec2beads/scripts/ops2beads.py inspect add-dark-mode --json
-```
+This command:
+- inspects the OpenSpec change
+- syncs explicit tasks into Beads
+- works the next ready Beads items
+- syncs Beads status back into `tasks.md`
 
-If needed, fix OpenSpec first. `inspect` is advisory only.
-
-### 3. Preview the sync
-
-```text
-Use openspec2beads to dry-run the sync for add-dark-mode.
-```
-
-```bash
-python3 skills/openspec2beads/scripts/ops2beads.py sync add-dark-mode --dry-run --json
-```
-
-### 4. Sync into Beads
-
-```text
-Use openspec2beads to sync change add-dark-mode into Beads.
-```
-
-```bash
-python3 skills/openspec2beads/scripts/ops2beads.py sync add-dark-mode --json
-```
-
-### 5. Implement from Beads
-
-```bash
-br ready
-br show <id>
-br update <id> --claim
-# implement
-br close <id> --reason "Completed"
-```
-
-Typical prompts:
-
-```text
-Show me the ready Beads issues for add-dark-mode.
-```
-
-```text
-Pick the next ready Beads issue for add-dark-mode and implement it.
-```
-
-### 6. Re-sync back into OpenSpec
-
-```text
-Use openspec2beads to sync add-dark-mode again and mirror Beads status back into tasks.md.
-```
-
-```bash
-python3 skills/openspec2beads/scripts/ops2beads.py sync add-dark-mode --json
-```
-
-### 7. Archive in OpenSpec
+### 3. Archive in OpenSpec
 
 ```text
 /opsx:archive add-dark-mode
 ```
 
+## Manual equivalent
+
+If you want to do the same flow manually, it is:
+
+```bash
+python3 skills/openspec2beads/scripts/ops2beads.py inspect add-dark-mode --json
+python3 skills/openspec2beads/scripts/ops2beads.py sync add-dark-mode --json
+br ready
+br show <id>
+br update <id> --claim
+# implement
+br close <id> --reason "Completed"
+python3 skills/openspec2beads/scripts/ops2beads.py sync add-dark-mode --json
+```
+
+Repeat the `br` loop and final sync until all Beads issues are closed.
+
 ## Copy-paste prompt sequence
 
 ```text
 /opsx:propose add-dark-mode
-Use openspec2beads to inspect change add-dark-mode and summarize anything I should fix before syncing to Beads.
-Use openspec2beads to dry-run the sync for add-dark-mode.
-Use openspec2beads to sync change add-dark-mode into Beads.
-Show me the ready Beads issues for add-dark-mode.
-Pick the next ready Beads issue for add-dark-mode and implement it.
-Use openspec2beads to sync add-dark-mode again and mirror Beads status back into tasks.md.
-Repeat until all Beads issues are closed.
+/beads:apply-openspec-change add-dark-mode
 /opsx:archive add-dark-mode
 ```
 
 ## Rules of thumb
 
 - If you want a new Beads issue, add the task to OpenSpec first, then sync.
-- If OpenSpec changes during implementation, run `sync` again.
+- If OpenSpec changes during implementation, run `/beads:apply-openspec-change` again or re-run `sync` manually.
 - If Beads and `tasks.md` disagree, Beads wins on sync.
 - `sync` writes:
   - `openspec/changes/<change>/beads-handoff.json`
@@ -153,4 +119,4 @@ Repeat until all Beads issues are closed.
 
 ## Command-name note
 
-This README uses commands like `/opsx:propose` and `/opsx:archive`. Your OpenSpec installation may use slightly different names; the workflow is the same.
+This README uses OpenSpec commands like `/opsx:propose` and `/opsx:archive`, plus the custom integration command `/beads:apply-openspec-change`. Depending on your agent/editor, the exact command syntax may differ; the workflow is the same.
