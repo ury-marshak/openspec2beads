@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = ROOT / "ops2beads.py"
+SCRIPT = ROOT / "skills" / "ops2beads" / "scripts" / "ops2beads.py"
 
 
 class Ops2BeadsCliTests(unittest.TestCase):

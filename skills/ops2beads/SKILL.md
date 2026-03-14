@@ -1,9 +1,9 @@
 ---
-name: ops2beads-handoff
-description: Translate OpenSpec change artifacts into Beads issues with the local ops2beads tool. Use when a repo contains ops2beads.py and the user wants to inspect or sync an OpenSpec change id or change directory into Beads, with Beads authoritative for execution status and OpenSpec authoritative for planning structure.
+name: ops2beads
+description: Translate OpenSpec change artifacts into Beads issues with the local ops2beads tool. Use when the OpenSpec change needs to be converted to Beads tasks or vice versa.
 ---
 
-Use the local tool at `../ops2beads.py` from this skill directory.
+Use the local tool at `./scripts/ops2beads.py` from this skill directory.
 
 ## Preferred workflow
 
@@ -11,7 +11,7 @@ Use the local tool at `../ops2beads.py` from this skill directory.
    - a change id like `add-dark-mode`
    - or a path like `openspec/changes/add-dark-mode`
 2. Prefer read-only inspection first:
-   - `python3 ../ops2beads.py inspect <target> --json`
+   - `python3 ./scripts/ops2beads.py inspect <target> --json`
 3. Review the inspect analysis before syncing:
    - `warnings`: artifact-level concerns such as missing `design.md`
    - `analysisWarnings`: task-quality concerns such as tasks that appear too broad
@@ -23,11 +23,11 @@ Use the local tool at `../ops2beads.py` from this skill directory.
    - revise `design.md` or spec artifacts
    - ask the user whether to refine the plan first
 5. Preview a full sync if the user wants a dry run first:
-   - `python3 ../ops2beads.py sync <target> --dry-run --json`
+   - `python3 ./scripts/ops2beads.py sync <target> --dry-run --json`
 6. Run sync:
    - first run bootstraps the Beads mapping
    - later runs sync OpenSpec planning changes into Beads and mirror Beads status back into local artifacts
-   - `python3 ../ops2beads.py sync <target> --json`
+   - `python3 ./scripts/ops2beads.py sync <target> --json`
 
 ## Common flags
 

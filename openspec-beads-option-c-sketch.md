@@ -225,8 +225,10 @@ ops2beads/
 If implemented as a script first:
 
 ```text
-scripts/
-└── ops2beads.py
+skills/
+└── ops2beads/
+    └── scripts/
+        └── ops2beads.py
 ```
 
 For a first practical version, Python is attractive because:

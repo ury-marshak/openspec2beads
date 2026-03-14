@@ -4,7 +4,7 @@ Proof-of-concept implementation of OpenSpec → Beads Option C.
 
 ## What it does
 
-`ops2beads.py` reads an OpenSpec change from:
+`skills/ops2beads/scripts/ops2beads.py` reads an OpenSpec change from:
 
 - `openspec/changes/<change>/proposal.md`
 - `openspec/changes/<change>/design.md` (optional)
@@ -24,19 +24,19 @@ It then:
 
 ```bash
 # inspect inferred work items and advisory analysis
-python3 ops2beads.py inspect <change-id>
+python3 skills/ops2beads/scripts/ops2beads.py inspect <change-id>
 # or
-python3 ops2beads.py inspect openspec/changes/<change-id>
+python3 skills/ops2beads/scripts/ops2beads.py inspect openspec/changes/<change-id>
 
 # if inspect reports likely gaps, refine OpenSpec artifacts first
 
 # preview the full sync without changing Beads or local files
-python3 ops2beads.py sync <change-id> --dry-run
+python3 skills/ops2beads/scripts/ops2beads.py sync <change-id> --dry-run
 
 # bootstrap on first run; afterwards sync plan changes and mirror status
-python3 ops2beads.py sync <change-id>
+python3 skills/ops2beads/scripts/ops2beads.py sync <change-id>
 # or
-python3 ops2beads.py sync openspec/changes/<change-id>
+python3 skills/ops2beads/scripts/ops2beads.py sync openspec/changes/<change-id>
 ```
 
 `sync` applies this authority model:
