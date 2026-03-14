@@ -1,5 +1,5 @@
 ---
-name: ops2beads
+name: openspec2beads
 description: Translate OpenSpec change artifacts into Beads issues with the local ops2beads tool. Use when the OpenSpec change needs to be converted to Beads tasks or vice versa.
 ---
 
