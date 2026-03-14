@@ -2,7 +2,7 @@
 
 Use this when you want to keep **OpenSpec** as the planning system, but use **Beads** (`br`) for the implementation stage.
 
-Use `/beads:apply-openspec-change` instead of stock `/opsx:apply` for Beads-backed implementation.
+Use the `openspec2beads-apply-change` skill instead of stock `/opsx:apply` for Beads-backed implementation.
 
 Workflow:
 
@@ -11,12 +11,12 @@ Workflow:
     ↓
 refine proposal.md / specs/ / design.md / tasks.md
     ↓
-/beads:apply-openspec-change
+openspec2beads-apply-change
     ↓
 /opsx:archive
 ```
 
-`/beads:apply-openspec-change` is the Beads-backed implementation step. It wraps the main loop:
+The `openspec2beads-apply-change` skill wraps the Beads-backed implementation loop:
 
 ```text
 ops2beads inspect → ops2beads sync → br ready/claim/implement/close → ops2beads sync back
@@ -29,7 +29,7 @@ ops2beads inspect → ops2beads sync → br ready/claim/implement/close → ops2
   - `specs/`
   - `design.md`
   - `tasks.md`
-- **Beads** tracks implementation:
+- **Beads** tracks execution:
   - issue IDs
   - ready / in progress / closed work
 
@@ -39,9 +39,9 @@ Main script:
 
 - `skills/openspec2beads/scripts/ops2beads.py`
 
-Command draft in this repo:
+Skill definition in this repo:
 
-- `commands/beads-apply-openspec-change.md`
+- `skills/openspec2beads-apply-change/SKILL.md`
 
 ## Before you start
 
@@ -64,17 +64,25 @@ br init
 /opsx:propose add-dark-mode
 ```
 
-### 2. Run the Beads-backed implementation command
+### 2. Use the Beads-backed implementation skill
+
+For example:
 
 ```text
-/beads:apply-openspec-change add-dark-mode
+Use openspec2beads-apply-change for add-dark-mode.
 ```
 
-This command:
-- inspects the OpenSpec change
-- syncs explicit tasks into Beads
-- works the next ready Beads items
-- syncs Beads status back into `tasks.md`
+Or ask naturally:
+
+```text
+Implement add-dark-mode through Beads.
+```
+
+The skill will:
+- inspect the OpenSpec change
+- sync explicit tasks into Beads
+- work ready Beads items
+- sync Beads status back into `tasks.md`
 
 ### 3. Archive in OpenSpec
 
@@ -84,7 +92,7 @@ This command:
 
 ## Manual equivalent
 
-If you want to do the same flow manually, it is:
+If you want to run the same flow manually:
 
 ```bash
 python3 skills/openspec2beads/scripts/ops2beads.py inspect add-dark-mode --json
@@ -103,20 +111,20 @@ Repeat the `br` loop and final sync until all Beads issues are closed.
 
 ```text
 /opsx:propose add-dark-mode
-/beads:apply-openspec-change add-dark-mode
+Use openspec2beads-apply-change for add-dark-mode.
 /opsx:archive add-dark-mode
 ```
 
 ## Rules of thumb
 
 - If you want a new Beads issue, add the task to OpenSpec first, then sync.
-- If OpenSpec changes during implementation, run `/beads:apply-openspec-change` again or re-run `sync` manually.
+- If OpenSpec changes during implementation, use the skill again or re-run `sync` manually.
 - If Beads and `tasks.md` disagree, Beads wins on sync.
 - `sync` writes:
   - `openspec/changes/<change>/beads-handoff.json`
   - `openspec/changes/<change>/beads-summary.md`
   - updated `openspec/changes/<change>/tasks.md`
 
-## Command-name note
+## Skill note
 
-This README uses OpenSpec commands like `/opsx:propose` and `/opsx:archive`, plus the custom integration command `/beads:apply-openspec-change`. Depending on your agent/editor, the exact command syntax may differ; the workflow is the same.
+Some agents expose installed skills through explicit invocation syntax or convenience commands, while others simply make the skill available when asked naturally. So the exact way you invoke `openspec2beads-apply-change` may differ by agent/editor, but the workflow is the same.

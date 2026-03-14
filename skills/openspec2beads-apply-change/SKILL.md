@@ -1,22 +1,19 @@
 ---
-name: beads:apply-openspec-change
-description: Implement an OpenSpec change through Beads by syncing tasks into Beads, working ready items, and syncing status back into OpenSpec.
-arguments: "[change-name]"
+name: openspec2beads-apply-change
+description: Implement an OpenSpec change through Beads. Use when the user wants to execute OpenSpec-planned work through Beads instead of the stock task-checkbox apply loop.
 ---
 
-Implement an OpenSpec change through **Beads** instead of the stock `/opsx:apply` task-checkbox loop.
+Implement an OpenSpec change through Beads.
 
-This command wraps the Beads-backed implementation flow:
-- `ops2beads inspect`
-- `ops2beads sync`
-- `br ready` / claim / implement / close
-- `ops2beads sync` back into `tasks.md`
+This skill wraps the Beads-backed implementation flow:
+- inspect the OpenSpec change with `ops2beads`
+- sync explicit OpenSpec tasks into Beads
+- work ready Beads items with `br`
+- sync Beads status back into `tasks.md`
 
-When all implementation work is complete, the next step is usually `/opsx:archive`.
+When all implementation work is complete, suggest `/opsx:archive`.
 
----
-
-**Input**: Optionally specify a change name (e.g. `/beads:apply-openspec-change add-dark-mode`). If omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST ask the user to choose an active change.
+**Input**: Optionally specify a change name. If omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST ask the user to choose an active change.
 
 **Steps**
 
@@ -33,13 +30,13 @@ When all implementation work is complete, the next step is usually `/opsx:archiv
 
    Verify:
    - `openspec/changes/<name>/` exists
-   - the change has `tasks.md`
+   - `tasks.md` exists for the change
    - `br` is installed and available
-   - Beads is initialized in the repo before the first real sync
+   - Beads is initialized before the first real sync
 
    If Beads is not initialized, explain that `br init` is required before the first non-dry-run sync.
 
-3. **Inspect the OpenSpec change first**
+3. **Inspect the OpenSpec change**
 
    Run:
 
@@ -77,12 +74,9 @@ When all implementation work is complete, the next step is usually `/opsx:archiv
    python3 skills/openspec2beads/scripts/ops2beads.py sync <name> --json
    ```
 
-   After sync:
-   - treat Beads as the execution tracker
-   - use Beads state as the source of truth for completion
-   - expect `tasks.md` to be updated by later syncs
+   After sync, treat Beads as the execution tracker.
 
-5. **Read current execution state from Beads**
+5. **Read current execution state**
 
    Start from ready work:
 
@@ -100,13 +94,13 @@ When all implementation work is complete, the next step is usually `/opsx:archiv
    - `openspec/changes/<name>/beads-summary.md`
    - `openspec/changes/<name>/tasks.md`
 
-6. **Implement ready Beads items (loop until done or blocked)**
+6. **Implement Beads items (loop until done or blocked)**
 
    For each ready item:
    - show which Beads item is being worked on
    - inspect it with `br show <id>`
    - claim or start it
-   - implement the required code changes
+   - implement the required changes
    - run relevant checks/tests when appropriate
    - close the item when complete
 
@@ -143,24 +137,6 @@ When all implementation work is complete, the next step is usually `/opsx:archiv
    - overall progress
    - if all work appears done, suggest `/opsx:archive <name>`
    - if paused, explain why and wait for guidance
-
-**Authority Model**
-
-Use this mental model throughout:
-
-- **OpenSpec is authoritative for planning structure**
-  - which tasks exist
-  - task wording
-  - dependency intent
-- **Beads is authoritative for execution state**
-  - issue IDs
-  - open / in_progress / closed
-  - what is actually complete
-
-Expected implications:
-- if the user wants a new Beads issue, add it to OpenSpec first, then sync
-- if inspect suggests missing tests or rollback work, that stays advisory until added to OpenSpec
-- if Beads and `tasks.md` disagree, Beads wins on sync
 
 **Output During Implementation**
 
@@ -210,6 +186,24 @@ Next step: /opsx:archive <change-name>
 
 What would you like to do?
 ```
+
+**Authority Model**
+
+Use this mental model throughout:
+
+- **OpenSpec is authoritative for planning structure**
+  - which tasks exist
+  - task wording
+  - dependency intent
+- **Beads is authoritative for execution state**
+  - issue IDs
+  - open / in_progress / closed
+  - what is actually complete
+
+Expected implications:
+- if the user wants a new Beads issue, add it to OpenSpec first, then sync
+- if inspect suggests missing tests or rollback work, that stays advisory until added to OpenSpec
+- if Beads and `tasks.md` disagree, Beads wins on sync
 
 **Guardrails**
 
