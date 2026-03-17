@@ -156,6 +156,9 @@ class Ops2BeadsError(RuntimeError):
     pass
 
 
+BR_TITLE_LIMIT = 50
+
+
 @dataclass
 class TaskRecord:
     key: str
@@ -695,6 +698,21 @@ def build_description(change_name: str, task: TaskRecord, acceptance: list[str],
     return "\n".join(lines).strip()
 
 
+def build_beads_title(item: dict[str, Any]) -> str:
+    title = str(item["title"]).strip()
+    if len(title) <= BR_TITLE_LIMIT:
+        return title
+
+    task_number = str(item.get("taskNumber") or "").strip()
+    if task_number:
+        prefix = f"{task_number} "
+        available = BR_TITLE_LIMIT - len(prefix) - 3
+        if available > 0:
+            return f"{prefix}{title[:available].rstrip()}..."
+
+    return f"{title[: BR_TITLE_LIMIT - 3].rstrip()}..."
+
+
 def build_plan(project_root: Path, change_name: str, allow_task_only: bool = False) -> dict[str, Any]:
     change_dir = project_root / "openspec" / "changes" / change_name
     if not change_dir.exists():
@@ -902,7 +920,7 @@ def br_create_issue(project_root: Path, item: dict[str, Any], parent_id: str | N
     cmd = [
         "br",
         "create",
-        item["title"],
+        build_beads_title(item),
         "--json",
         "-t",
         item["type"],
@@ -929,7 +947,7 @@ def br_update_issue(project_root: Path, issue_id: str, item: dict[str, Any], par
         issue_id,
         "--json",
         "--title",
-        item["title"],
+        build_beads_title(item),
         "--description",
         item["description"],
         "-t",
@@ -1104,7 +1122,9 @@ def execute_reconcile(project_root: Path, plan: dict[str, Any]) -> dict[str, Any
     change_label = f"change:{plan['changeName']}"
 
     if not epic.get("beadsId"):
-        existing_epic = find_existing_issue(issues, label=change_label, title=epic["title"], issue_type="epic")
+        existing_epic = find_existing_issue(
+            issues, label=change_label, title=build_beads_title(epic), issue_type="epic"
+        )
         if existing_epic:
             epic["beadsId"] = existing_epic["id"]
 
@@ -1118,7 +1138,9 @@ def execute_reconcile(project_root: Path, plan: dict[str, Any]) -> dict[str, Any
 
     for item in plan["workItems"]:
         if not item.get("beadsId"):
-            existing = find_existing_issue(issues, label=change_label, title=item["title"], issue_type=item["type"])
+            existing = find_existing_issue(
+                issues, label=change_label, title=build_beads_title(item), issue_type=item["type"]
+            )
             if existing:
                 item["beadsId"] = existing["id"]
         if item.get("beadsId") and item["beadsId"] in indexed_issues:

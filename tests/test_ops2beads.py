@@ -324,6 +324,43 @@ class Ops2BeadsCliTests(unittest.TestCase):
         self.assertFalse(any("Add explicit tests" in title for title in issue_titles))
         self.assertFalse(any("rollback" in title.lower() for title in issue_titles))
 
+    def test_sync_truncates_long_beads_titles_but_preserves_full_description(self) -> None:
+        long_title = "Implement complete authentication system with login, refresh, logout, roles, and permissions"
+        self.write_tasks(
+            f"""\
+            # Tasks
+
+            ## 1. Auth
+            - [ ] 1.1 {long_title}
+            """
+        )
+
+        self.init_beads()
+        self.run_cli("sync", "add-dark-mode")
+
+        issues = self.list_issues()
+        task_issue = next(issue for issue in issues if issue["issue_type"] == "task")
+        self.assertLessEqual(len(task_issue["title"]), 50)
+        self.assertTrue(task_issue["title"].startswith("1.1 "))
+        self.assertEqual(task_issue["description"].splitlines()[0], long_title)
+
+    def test_sync_reuses_existing_long_title_issue_on_resync(self) -> None:
+        self.write_tasks(
+            """\
+            # Tasks
+
+            ## 1. Auth
+            - [ ] 1.1 Implement complete authentication system with login, refresh, logout, roles, and permissions
+            """
+        )
+
+        self.init_beads()
+        self.run_cli("sync", "add-dark-mode")
+        self.run_cli("sync", "add-dark-mode")
+
+        issues = self.list_issues()
+        self.assertEqual(len([issue for issue in issues if issue["issue_type"] == "task"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
